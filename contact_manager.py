@@ -1,8 +1,10 @@
 import json
 import os
+from datetime import datetime
 
 CONTACTS_FILE = "contactos.dat"
 INDEX_FILE = "indice.json"
+EXPORT_JSON_FILE = "contactos_exportados.json"
 
 # Definición de longitudes fijas para cada campo (Total = 120 caracteres por registro)
 # id: 6 | nombre: 30 | telefono: 15 | correo: 40 | ciudad: 28 | salto de línea (\n): 1 -> 120 bytes
@@ -20,8 +22,8 @@ RECORD_SIZE = sum(FIELD_LENGTHS.values()) + 1  # 119 caracteres de datos + 1 sal
 class ContactManager:
     """
     Gestor de archivos para la agenda de contactos con registros de tamaño fijo.
-    Incluye índice primario en JSON (indice.json), búsqueda directa por ID con seek()
-    y modificación en el lugar (in-place) sin reescribir el resto del archivo.
+    Incluye índice primario en JSON (indice.json), búsqueda directa por ID con seek(),
+    modificación en el lugar (in-place) y exportación estructurada a JSON.
     """
 
     def __init__(self, filename=CONTACTS_FILE, index_filename=INDEX_FILE):
@@ -50,7 +52,6 @@ class ContactManager:
         try:
             with open(self.index_filename, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                # Normalizar claves como string de ID y valores como entero de número de registro
                 self.index = {str(k): int(v) for k, v in data.items()}
             print(f"INFO: Índice cargado desde '{self.index_filename}' ({len(self.index)} registros).")
         except (json.JSONDecodeError, ValueError) as e:
@@ -242,3 +243,34 @@ class ContactManager:
                     contacts.append(parsed)
                 record_num += 1
         return contacts
+
+    def export_to_json(self, output_file=EXPORT_JSON_FILE):
+        """
+        Exporta todos los contactos del archivo de registros fijos (contactos.dat)
+        a un archivo JSON estructurado en UTF-8, incluyendo metadatos de exportación.
+        """
+        contacts = self.get_all_contacts()
+        export_payload = {
+            "fecha_exportacion": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "archivo_origen": self.filename,
+            "tamano_registro_fijo": RECORD_SIZE,
+            "total_contactos": len(contacts),
+            "contactos": [
+                {
+                    "id": c["id"],
+                    "nombre": c["nombre"],
+                    "telefono": c["telefono"],
+                    "correo": c["correo"],
+                    "ciudad": c["ciudad"],
+                    "numero_registro": c["registro"],
+                    "offset_bytes": c["offset"]
+                }
+                for c in contacts
+            ]
+        }
+
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(export_payload, f, indent=4, ensure_ascii=False)
+
+        print(f"INFO: {len(contacts)} contactos exportados exitosamente a '{output_file}'.")
+        return output_file, len(contacts)

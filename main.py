@@ -1,6 +1,7 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
-from contact_manager import ContactManager, RECORD_SIZE
+from tkinter import ttk, messagebox, simpledialog, filedialog
+import os
+from contact_manager import ContactManager, RECORD_SIZE, EXPORT_JSON_FILE
 
 
 class AgendaApp(tk.Tk):
@@ -31,9 +32,9 @@ class AgendaApp(tk.Tk):
         contactos_menu.add_command(label="Salir", command=self.quit)
         menubar.add_cascade(label="Contactos", menu=contactos_menu)
 
-        # 2. Menú Exportar
+        # 2. Menú Exportar (Exportar a JSON funcional; PDF en próximo commit)
         exportar_menu = tk.Menu(menubar, tearoff=0, font=("Segoe UI", 10))
-        exportar_menu.add_command(label="Exportar a JSON", command=lambda: self.pending_feature("Exportar a JSON"))
+        exportar_menu.add_command(label="Exportar a JSON", command=self.export_contacts_json)
         exportar_menu.add_command(label="Generar reporte PDF", command=lambda: self.pending_feature("Generar reporte PDF"))
         menubar.add_cascade(label="Exportar", menu=exportar_menu)
 
@@ -299,6 +300,30 @@ class AgendaApp(tk.Tk):
         except KeyError as e:
             messagebox.showerror("ID no encontrado", str(e))
 
+    def export_contacts_json(self):
+        filepath = filedialog.asksaveasfilename(
+            title="Exportar contactos a JSON",
+            initialfile=EXPORT_JSON_FILE,
+            defaultextension=".json",
+            filetypes=[("Archivos JSON", "*.json"), ("Todos los archivos", "*.*")],
+            parent=self
+        )
+        if not filepath:
+            return
+
+        try:
+            saved_path, total = self.manager.export_to_json(filepath)
+            self.status_bar.configure(
+                text=f" Exportación exitosa: {total} contactos guardados en '{os.path.basename(saved_path)}' (UTF-8)"
+            )
+            messagebox.showinfo(
+                "Exportar a JSON",
+                f"Se exportaron {total} contactos exitosamente.\n\n"
+                f"Archivo generado:\n{saved_path}"
+            )
+        except Exception as e:
+            messagebox.showerror("Error al exportar", f"No se pudo exportar el archivo JSON:\n{e}")
+
     def refresh_table(self):
         for item in self.tree.get_children():
             self.tree.delete(item)
@@ -318,10 +343,10 @@ class AgendaApp(tk.Tk):
     def show_help(self):
         messagebox.showinfo(
             "Ayuda (Simulado)",
-            "Agenda de Contactos con Acceso Aleatorio v0.2\n\n"
+            "Agenda de Contactos con Acceso Aleatorio v0.3\n\n"
             f"• Tamaño fijo por registro: {RECORD_SIZE} bytes.\n"
             "• Índice primario almacenado en 'indice.json'.\n"
-            "• Búsqueda por ID y modificación in-place mediante seek() y tell()."
+            "• Exportación estructurada a JSON habilitada."
         )
 
 
