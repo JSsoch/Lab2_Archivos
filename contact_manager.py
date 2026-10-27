@@ -1,10 +1,12 @@
 import json
 import os
 from datetime import datetime
+from fpdf import FPDF
 
 CONTACTS_FILE = "contactos.dat"
 INDEX_FILE = "indice.json"
 EXPORT_JSON_FILE = "contactos_exportados.json"
+REPORT_PDF_FILE = "reporte_contactos.pdf"
 
 # Definición de longitudes fijas para cada campo (Total = 120 caracteres por registro)
 # id: 6 | nombre: 30 | telefono: 15 | correo: 40 | ciudad: 28 | salto de línea (\n): 1 -> 120 bytes
@@ -19,11 +21,39 @@ FIELD_LENGTHS = {
 RECORD_SIZE = sum(FIELD_LENGTHS.values()) + 1  # 119 caracteres de datos + 1 salto de línea = 120
 
 
+class ContactReportPDF(FPDF):
+    """
+    Plantilla de reporte PDF generada con fpdf2 a partir del archivo JSON exportado.
+    """
+
+    def header(self):
+        self.set_font("Helvetica", "B", 15)
+        self.set_text_color(25, 55, 109)
+        self.cell(0, 10, "Agenda de Contactos - Reporte Oficial", new_x="LMARGIN", new_y="NEXT", align="C")
+        self.set_font("Helvetica", "", 9)
+        self.set_text_color(90, 90, 90)
+        self.cell(
+            0,
+            6,
+            f"Fecha y hora de generacion: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  |  Tamano de registro fijo: {RECORD_SIZE} bytes",
+            new_x="LMARGIN",
+            new_y="NEXT",
+            align="C"
+        )
+        self.ln(4)
+
+    def footer(self):
+        self.set_y(-15)
+        self.set_font("Helvetica", "I", 8)
+        self.set_text_color(128, 128, 128)
+        self.cell(0, 10, f"Pagina {self.page_no()}/{{nb}} - Generado a partir de JSON exportado", align="C")
+
+
 class ContactManager:
     """
     Gestor de archivos para la agenda de contactos con registros de tamaño fijo.
     Incluye índice primario en JSON (indice.json), búsqueda directa por ID con seek(),
-    modificación en el lugar (in-place) y exportación estructurada a JSON.
+    modificación en el lugar (in-place), exportación a JSON y generación de reporte PDF.
     """
 
     def __init__(self, filename=CONTACTS_FILE, index_filename=INDEX_FILE):
@@ -274,3 +304,93 @@ class ContactManager:
 
         print(f"INFO: {len(contacts)} contactos exportados exitosamente a '{output_file}'.")
         return output_file, len(contacts)
+
+    @staticmethod
+    def _safe_latin1(text):
+        """
+        Asegura compatibilidad con las fuentes estándar de FPDF (latin-1).
+        """
+        return str(text).encode("latin-1", "replace").decode("latin-1")
+
+    def generate_pdf_from_json(self, pdf_file=REPORT_PDF_FILE, json_file=EXPORT_JSON_FILE):
+        """
+        Exporta (o actualiza) primero el archivo JSON y, a partir de ese JSON,
+        genera un reporte PDF con tabla formateada y fecha de generación usando fpdf2.
+        """
+        # Garantizar que el archivo JSON esté actualizado antes de leerlo para el PDF
+        self.export_to_json(json_file)
+
+        with open(json_file, "r", encoding="utf-8") as f:
+            json_data = json.load(f)
+
+        contacts_list = json_data.get("contactos", [])
+        fecha_export = json_data.get("fecha_exportacion", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+        pdf = ContactReportPDF(orientation="P", unit="mm", format="A4")
+        pdf.alias_nb_pages()
+        pdf.add_page()
+
+        # Bloque de resumen del archivo JSON origen
+        pdf.set_fill_color(240, 244, 248)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(30, 30, 30)
+        pdf.cell(
+            0,
+            8,
+            self._safe_latin1(
+                f"Origen de datos: {os.path.basename(json_file)}  |  "
+                f"Total de contactos: {len(contacts_list)}  |  "
+                f"Exportado: {fecha_export}"
+            ),
+            border=1,
+            new_x="LMARGIN",
+            new_y="NEXT",
+            fill=True
+        )
+        pdf.ln(4)
+
+        # Encabezados de la tabla
+        col_widths = [12, 16, 15, 45, 28, 48, 26]
+        headers = ["#Reg", "Offset", "ID", "Nombre", "Telefono", "Correo", "Ciudad"]
+
+        pdf.set_fill_color(25, 55, 109)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_font("Helvetica", "B", 9)
+
+        for width, title in zip(col_widths, headers):
+            pdf.cell(width, 8, title, border=1, align="C", fill=True)
+        pdf.ln()
+
+        # Filas de contactos leídas desde el JSON
+        pdf.set_font("Helvetica", "", 8)
+        pdf.set_text_color(20, 20, 20)
+
+        if not contacts_list:
+            pdf.cell(sum(col_widths), 10, "No hay contactos registrados para mostrar.", border=1, align="C")
+            pdf.ln()
+        else:
+            for idx, c in enumerate(contacts_list):
+                fill_row = (idx % 2 == 1)
+                if fill_row:
+                    pdf.set_fill_color(245, 247, 250)
+                else:
+                    pdf.set_fill_color(255, 255, 255)
+
+                row_values = [
+                    str(c.get("numero_registro", idx)),
+                    f"{c.get('offset_bytes', idx * RECORD_SIZE)}B",
+                    str(c.get("id", "")),
+                    self._safe_latin1(c.get("nombre", ""))[:24],
+                    self._safe_latin1(c.get("telefono", ""))[:15],
+                    self._safe_latin1(c.get("correo", ""))[:28],
+                    self._safe_latin1(c.get("ciudad", ""))[:15],
+                ]
+
+                aligns = ["C", "C", "C", "L", "C", "L", "L"]
+                for width, val, align in zip(col_widths, row_values, aligns):
+                    pdf.cell(width, 7, val, border=1, align=align, fill=True)
+                pdf.ln()
+
+        pdf.output(pdf_file)
+        print(f"INFO: Reporte PDF generado exitosamente en '{pdf_file}' a partir de '{json_file}'.")
+        return pdf_file, len(contacts_list)

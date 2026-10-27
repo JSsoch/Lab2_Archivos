@@ -1,13 +1,13 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog, filedialog
 import os
-from contact_manager import ContactManager, RECORD_SIZE, EXPORT_JSON_FILE
+from contact_manager import ContactManager, RECORD_SIZE, EXPORT_JSON_FILE, REPORT_PDF_FILE
 
 
 class AgendaApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Agenda de Contactos - Acceso Aleatorio e Índice Primario")
+        self.title("Agenda de Contactos - Acceso Aleatorio, JSON y Reporte PDF")
         self.geometry("880x560")
 
         self.manager = ContactManager()
@@ -32,10 +32,10 @@ class AgendaApp(tk.Tk):
         contactos_menu.add_command(label="Salir", command=self.quit)
         menubar.add_cascade(label="Contactos", menu=contactos_menu)
 
-        # 2. Menú Exportar (Exportar a JSON funcional; PDF en próximo commit)
+        # 2. Menú Exportar (Funcional: Exportar a JSON y Generar reporte PDF)
         exportar_menu = tk.Menu(menubar, tearoff=0, font=("Segoe UI", 10))
         exportar_menu.add_command(label="Exportar a JSON", command=self.export_contacts_json)
-        exportar_menu.add_command(label="Generar reporte PDF", command=lambda: self.pending_feature("Generar reporte PDF"))
+        exportar_menu.add_command(label="Generar reporte PDF", command=self.export_contacts_pdf)
         menubar.add_cascade(label="Exportar", menu=exportar_menu)
 
         # 3. Menú Herramientas
@@ -324,6 +324,31 @@ class AgendaApp(tk.Tk):
         except Exception as e:
             messagebox.showerror("Error al exportar", f"No se pudo exportar el archivo JSON:\n{e}")
 
+    def export_contacts_pdf(self):
+        filepath = filedialog.asksaveasfilename(
+            title="Generar Reporte PDF de Contactos",
+            initialfile=REPORT_PDF_FILE,
+            defaultextension=".pdf",
+            filetypes=[("Archivos PDF", "*.pdf"), ("Todos los archivos", "*.*")],
+            parent=self
+        )
+        if not filepath:
+            return
+
+        try:
+            pdf_path, total = self.manager.generate_pdf_from_json(pdf_file=filepath)
+            self.status_bar.configure(
+                text=f" Reporte PDF generado con éxito ({total} contactos) en '{os.path.basename(pdf_path)}'"
+            )
+            messagebox.showinfo(
+                "Reporte PDF Generado",
+                f"Se generó el reporte PDF a partir del archivo JSON exportado.\n\n"
+                f"• Total de contactos incluidos: {total}\n"
+                f"• Ubicación del PDF:\n{pdf_path}"
+            )
+        except Exception as e:
+            messagebox.showerror("Error al generar PDF", f"Ocurrió un problema al generar el reporte PDF:\n{e}")
+
     def refresh_table(self):
         for item in self.tree.get_children():
             self.tree.delete(item)
@@ -343,10 +368,10 @@ class AgendaApp(tk.Tk):
     def show_help(self):
         messagebox.showinfo(
             "Ayuda (Simulado)",
-            "Agenda de Contactos con Acceso Aleatorio v0.3\n\n"
+            "Agenda de Contactos con Acceso Aleatorio v0.4\n\n"
             f"• Tamaño fijo por registro: {RECORD_SIZE} bytes.\n"
             "• Índice primario almacenado en 'indice.json'.\n"
-            "• Exportación estructurada a JSON habilitada."
+            "• Exportación a JSON y generación de reporte PDF con fpdf2 habilitadas."
         )
 
 
