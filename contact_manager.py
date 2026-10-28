@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import zipfile
 from datetime import datetime
 from fpdf import FPDF
 
@@ -9,9 +10,10 @@ INDEX_FILE = "indice.json"
 HASH_FILE = "contactos.sha256"
 EXPORT_JSON_FILE = "contactos_exportados.json"
 REPORT_PDF_FILE = "reporte_contactos.pdf"
+BACKUP_ZIP_FILE = "respaldo_agenda.zip"
 
-# Definición de longitudes fijas para cada campo (Total = 120 caracteres por registro)
-# id: 6 | nombre: 30 | telefono: 15 | correo: 40 | ciudad: 28 | salto de línea (\n): 1 -> 120 bytes
+# Definición de longitudes fijas para cada campo (Total = 120 caracteres / bytes en ASCII/UTF-8 base por registro)
+# id: 6 | nombre: 30 | telefono: 15 | correo: 40 | ciudad: 28 | salto de línea (\n): 1 -> 120 caracteres
 FIELD_LENGTHS = {
     "id": 6,
     "nombre": 30,
@@ -54,9 +56,15 @@ class ContactReportPDF(FPDF):
 class ContactManager:
     """
     Gestor de archivos para la agenda de contactos con registros de tamaño fijo.
-    Incluye índice primario en JSON (indice.json), búsqueda directa por ID con seek(),
-    modificación en el lugar (in-place), exportación a JSON, reporte PDF y
-    verificación de integridad mediante hash SHA-256 (contactos.sha256).
+    Implementa:
+    - Registros de longitud fija (120 bytes) rellenados con ljust() en UTF-8
+    - Acceso aleatorio directo y modificación in-place mediante seek() y tell()
+    - Índice primario persistente en JSON (indice.json)
+    - Exportación a JSON y generación de reporte PDF con fpdf2
+    - Verificación de integridad con hash SHA-256 (hashlib)
+    - Respaldo comprimido en ZIP (zipfile) comparando tamaño original vs comprimido
+    - Consulta de metadatos y permisos de sistema de archivos (os.stat y os.access)
+    - Manejo robusto de excepciones (archivos inexistentes, corruptos o sin permisos)
     """
 
     def __init__(self, filename=CONTACTS_FILE, index_filename=INDEX_FILE, hash_filename=HASH_FILE):
@@ -64,15 +72,23 @@ class ContactManager:
         self.index_filename = index_filename
         self.hash_filename = hash_filename
         self.index = {}
+        self.last_error = None
         self._ensure_file_exists()
         self.load_index()
 
     def _ensure_file_exists(self):
         if not os.path.exists(self.filename):
-            with open(self.filename, "w", encoding="utf-8", newline="\n") as f:
-                pass
-            self.save_hash()
-            print(f"INFO: Archivo '{self.filename}' y su hash inicial creados exitosamente.")
+            try:
+                with open(self.filename, "w", encoding="utf-8", newline="\n") as f:
+                    pass
+                self.save_hash()
+                print(f"INFO: Archivo '{self.filename}' y su hash inicial creados exitosamente.")
+            except PermissionError:
+                self.last_error = f"Sin permisos de escritura para crear '{self.filename}'."
+                print(f"ERROR: {self.last_error}")
+            except OSError as e:
+                self.last_error = f"Error de sistema al crear '{self.filename}': {e}"
+                print(f"ERROR: {self.last_error}")
 
     def calculate_sha256(self):
         """
@@ -82,11 +98,20 @@ class ContactManager:
         if not os.path.exists(self.filename):
             return ""
 
-        sha256 = hashlib.sha256()
-        with open(self.filename, "rb") as f:
-            for chunk in iter(lambda: f.read(4096), b""):
-                sha256.update(chunk)
-        return sha256.hexdigest()
+        try:
+            sha256 = hashlib.sha256()
+            with open(self.filename, "rb") as f:
+                for chunk in iter(lambda: f.read(4096), b""):
+                    sha256.update(chunk)
+            return sha256.hexdigest()
+        except PermissionError:
+            self.last_error = f"Sin permisos de lectura sobre '{self.filename}' para calcular SHA-256."
+            print(f"ERROR: {self.last_error}")
+            return ""
+        except OSError as e:
+            self.last_error = f"Fallo al calcular SHA-256: {e}"
+            print(f"ERROR: {self.last_error}")
+            return ""
 
     def save_hash(self):
         """
@@ -94,10 +119,21 @@ class ContactManager:
         Se invoca automáticamente cada vez que se guarda o modifica un contacto.
         """
         current_hash = self.calculate_sha256()
-        with open(self.hash_filename, "w", encoding="utf-8") as f:
-            f.write(current_hash + "\n")
-        print(f"INFO: Hash SHA-256 actualizado en '{self.hash_filename}': {current_hash[:16]}...")
-        return current_hash
+        if not current_hash:
+            return ""
+        try:
+            with open(self.hash_filename, "w", encoding="utf-8") as f:
+                f.write(current_hash + "\n")
+            print(f"INFO: Hash SHA-256 actualizado en '{self.hash_filename}': {current_hash[:16]}...")
+            return current_hash
+        except PermissionError:
+            self.last_error = f"Sin permisos de escritura en '{self.hash_filename}'."
+            print(f"ERROR: {self.last_error}")
+            return current_hash
+        except OSError as e:
+            self.last_error = f"Error al guardar hash SHA-256: {e}"
+            print(f"ERROR: {self.last_error}")
+            return current_hash
 
     def verify_integrity(self):
         """
@@ -108,10 +144,12 @@ class ContactManager:
         if not os.path.exists(self.filename):
             return False, "", "", f"El archivo '{self.filename}' no existe."
 
+        if not os.access(self.filename, os.R_OK):
+            return False, "", "", f"No hay permisos de lectura sobre '{self.filename}'."
+
         current_hash = self.calculate_sha256()
 
         if not os.path.exists(self.hash_filename):
-            # Si aún no existía archivo hash pero el archivo está vacío, lo inicializamos
             if os.path.getsize(self.filename) == 0:
                 self.save_hash()
                 return True, current_hash, current_hash, "Archivo nuevo verificado correctamente."
@@ -122,11 +160,14 @@ class ContactManager:
                 f"No se encontró el archivo de control '{self.hash_filename}'. El archivo pudo haber sido manipulado."
             )
 
-        with open(self.hash_filename, "r", encoding="utf-8") as f:
-            stored_hash = f.read().strip().split()[0] if f.read(1) else ""
-            f.seek(0)
-            content = f.read().strip()
-            stored_hash = content.split()[0] if content else ""
+        try:
+            with open(self.hash_filename, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                stored_hash = content.split()[0] if content else ""
+        except PermissionError:
+            return False, current_hash, "(Sin permisos)", f"Sin permisos para leer '{self.hash_filename}'."
+        except OSError as e:
+            return False, current_hash, "(Error)", f"Error leyendo '{self.hash_filename}': {e}"
 
         if current_hash == stored_hash:
             return (
@@ -146,9 +187,10 @@ class ContactManager:
     def load_index(self):
         """
         Carga el índice primario desde indice.json.
-        Si el archivo no existe pero contactos.dat tiene datos, reconstruye el índice.
+        Si el archivo no existe o está corrupto, reconstruye el índice sin que la aplicación se caiga.
         """
         if not os.path.exists(self.index_filename):
+            print(f"INFO: Archivo de índice '{self.index_filename}' no encontrado. Reconstruyendo automáticamente...")
             self.index = {}
             self.rebuild_index()
             return
@@ -156,18 +198,39 @@ class ContactManager:
         try:
             with open(self.index_filename, "r", encoding="utf-8") as f:
                 data = json.load(f)
+                if not isinstance(data, dict):
+                    raise ValueError("El contenido del índice JSON no es un objeto clave-valor.")
                 self.index = {str(k): int(v) for k, v in data.items()}
             print(f"INFO: Índice cargado desde '{self.index_filename}' ({len(self.index)} registros).")
         except (json.JSONDecodeError, ValueError) as e:
-            print(f"WARN: Archivo de índice corrupto ({e}). Reconstruyendo desde '{self.filename}'...")
+            self.last_error = f"Índice '{self.index_filename}' corrupto ({e}). Reconstruido automáticamente."
+            print(f"ERROR: {self.last_error}")
             self.rebuild_index()
+        except PermissionError:
+            self.last_error = f"Sin permisos de lectura para '{self.index_filename}'. Usando índice en memoria."
+            print(f"ERROR: {self.last_error}")
+            self.index = {}
+        except OSError as e:
+            self.last_error = f"Fallo al abrir '{self.index_filename}': {e}"
+            print(f"ERROR: {self.last_error}")
+            self.index = {}
 
     def save_index(self):
         """
-        Guarda el diccionario de índice primario {id: numero_de_registro} en indice.json.
+        Guarda el diccionario de índice primario {id: numero_de_registro} en indice.json (UTF-8).
         """
-        with open(self.index_filename, "w", encoding="utf-8") as f:
-            json.dump(self.index, f, indent=4, ensure_ascii=False)
+        try:
+            with open(self.index_filename, "w", encoding="utf-8") as f:
+                json.dump(self.index, f, indent=4, ensure_ascii=False)
+            return True
+        except PermissionError:
+            self.last_error = f"Sin permisos de escritura para guardar el índice '{self.index_filename}'."
+            print(f"ERROR: {self.last_error}")
+            return False
+        except OSError as e:
+            self.last_error = f"Error al escribir '{self.index_filename}': {e}"
+            print(f"ERROR: {self.last_error}")
+            return False
 
     def rebuild_index(self):
         """
@@ -178,30 +241,60 @@ class ContactManager:
             self.save_index()
             return
 
-        with open(self.filename, "r", encoding="utf-8", newline="\n") as f:
-            record_num = 0
-            while True:
-                f.seek(record_num * RECORD_SIZE)
-                raw_data = f.read(RECORD_SIZE)
-                if not raw_data or len(raw_data) < RECORD_SIZE - 1:
-                    break
-                parsed = self.parse_record(raw_data)
-                if parsed and parsed["id"] != "":
-                    self.index[str(parsed["id"])] = record_num
-                record_num += 1
+        try:
+            with open(self.filename, "r", encoding="utf-8", newline="\n") as f:
+                record_num = 0
+                while True:
+                    f.seek(record_num * RECORD_SIZE)
+                    raw_data = f.read(RECORD_SIZE)
+                    if not raw_data or len(raw_data) < RECORD_SIZE - 1:
+                        break
+                    parsed = self.parse_record(raw_data)
+                    if parsed and str(parsed["id"]).strip() != "":
+                        self.index[str(parsed["id"])] = record_num
+                    record_num += 1
+            self.save_index()
+        except PermissionError:
+            self.last_error = f"Sin permisos para leer '{self.filename}' durante la reconstrucción del índice."
+            print(f"ERROR: {self.last_error}")
+        except OSError as e:
+            self.last_error = f"Error reconstruyendo el índice: {e}"
+            print(f"ERROR: {self.last_error}")
 
-        self.save_index()
+    @staticmethod
+    def _normalize_fixed_ascii(text, max_len):
+        """
+        Ajusta la cadena a longitud fija exacta en caracteres y bytes UTF-8 usando ljust().
+        Para garantizar que seek(num_registro * RECORD_SIZE) coincida exactamente en bytes y caracteres,
+        normaliza caracteres multibyte si los hubiera.
+        """
+        clean = str(text).replace("\n", " ").replace("\r", " ").strip()
+        # Si algún carácter ocupa más de 1 byte en UTF-8, se reemplaza por su equivalente ASCII seguro
+        # para garantizar que 120 caracteres sean siempre exactamente 120 bytes en disco.
+        safe_chars = []
+        for ch in clean:
+            if len(ch.encode("utf-8")) == 1:
+                safe_chars.append(ch)
+            else:
+                replacements = {
+                    "á": "a", "é": "e", "í": "i", "ó": "o", "ú": "u",
+                    "Á": "A", "É": "E", "Í": "I", "Ó": "O", "Ú": "U",
+                    "ñ": "n", "Ñ": "N", "ü": "u", "Ü": "U"
+                }
+                safe_chars.append(replacements.get(ch, "?"))
+        normalized = "".join(safe_chars)[:max_len]
+        return normalized.ljust(max_len)
 
     def format_record(self, contact_id, nombre, telefono, correo, ciudad):
         """
         Rellena cada campo con espacios a la derecha usando ljust() para garantizar
-        que todos los registros midan exactamente RECORD_SIZE (120 caracteres).
+        que todos los registros midan exactamente RECORD_SIZE (120 bytes).
         """
-        id_str = str(contact_id).strip()[:FIELD_LENGTHS["id"]].ljust(FIELD_LENGTHS["id"])
-        nom_str = str(nombre).strip()[:FIELD_LENGTHS["nombre"]].ljust(FIELD_LENGTHS["nombre"])
-        tel_str = str(telefono).strip()[:FIELD_LENGTHS["telefono"]].ljust(FIELD_LENGTHS["telefono"])
-        cor_str = str(correo).strip()[:FIELD_LENGTHS["correo"]].ljust(FIELD_LENGTHS["correo"])
-        ciu_str = str(ciudad).strip()[:FIELD_LENGTHS["ciudad"]].ljust(FIELD_LENGTHS["ciudad"])
+        id_str = self._normalize_fixed_ascii(contact_id, FIELD_LENGTHS["id"])
+        nom_str = self._normalize_fixed_ascii(nombre, FIELD_LENGTHS["nombre"])
+        tel_str = self._normalize_fixed_ascii(telefono, FIELD_LENGTHS["telefono"])
+        cor_str = self._normalize_fixed_ascii(correo, FIELD_LENGTHS["correo"])
+        ciu_str = self._normalize_fixed_ascii(ciudad, FIELD_LENGTHS["ciudad"])
 
         record = f"{id_str}{nom_str}{tel_str}{cor_str}{ciu_str}\n"
         return record
@@ -245,17 +338,22 @@ class ContactManager:
         if id_key in self.index:
             raise ValueError(f"Ya existe un contacto registrado con el ID {id_key}.")
 
+        self._ensure_file_exists()
         record = self.format_record(id_key, nombre, telefono, correo, ciudad)
 
-        with open(self.filename, "r+", encoding="utf-8", newline="\n") as f:
-            f.seek(0, os.SEEK_END)
-            byte_offset = f.tell()
-            record_number = byte_offset // RECORD_SIZE
+        try:
+            with open(self.filename, "r+", encoding="utf-8", newline="\n") as f:
+                f.seek(0, os.SEEK_END)
+                byte_offset = f.tell()
+                record_number = byte_offset // RECORD_SIZE
 
-            f.write(record)
-            new_pos = f.tell()
+                f.write(record)
+                new_pos = f.tell()
+        except PermissionError as e:
+            raise PermissionError(f"No hay permisos de escritura sobre '{self.filename}'.") from e
+        except OSError as e:
+            raise OSError(f"Error al escribir en '{self.filename}': {e}") from e
 
-        # Actualizar índice primario y hash de integridad SHA-256
         self.index[id_key] = record_number
         self.save_index()
         new_hash = self.save_hash()
@@ -294,11 +392,16 @@ class ContactManager:
         target_offset = record_number * RECORD_SIZE
         record = self.format_record(id_key, nombre, telefono, correo, ciudad)
 
-        with open(self.filename, "r+", encoding="utf-8", newline="\n") as f:
-            f.seek(target_offset)
-            start_pos = f.tell()
-            f.write(record)
-            end_pos = f.tell()
+        try:
+            with open(self.filename, "r+", encoding="utf-8", newline="\n") as f:
+                f.seek(target_offset)
+                start_pos = f.tell()
+                f.write(record)
+                end_pos = f.tell()
+        except PermissionError as e:
+            raise PermissionError(f"No hay permisos de escritura para modificar '{self.filename}'.") from e
+        except OSError as e:
+            raise OSError(f"Error al sobrescribir el registro en '{self.filename}': {e}") from e
 
         new_hash = self.save_hash()
 
@@ -313,13 +416,21 @@ class ContactManager:
         Lee un contacto directamente calculando su posición (record_number * RECORD_SIZE)
         sin recorrer el archivo completo.
         """
+        if not os.path.exists(self.filename):
+            return None, 0, 0
+
         target_offset = record_number * RECORD_SIZE
 
-        with open(self.filename, "r", encoding="utf-8", newline="\n") as f:
-            f.seek(target_offset)
-            current_pos = f.tell()
-            raw_data = f.read(RECORD_SIZE)
-            end_pos = f.tell()
+        try:
+            with open(self.filename, "r", encoding="utf-8", newline="\n") as f:
+                f.seek(target_offset)
+                current_pos = f.tell()
+                raw_data = f.read(RECORD_SIZE)
+                end_pos = f.tell()
+        except PermissionError as e:
+            raise PermissionError(f"Sin permisos de lectura en '{self.filename}'.") from e
+        except UnicodeDecodeError as e:
+            raise ValueError(f"Archivo '{self.filename}' corrupto (codificación UTF-8 inválida).") from e
 
         if not raw_data:
             return None, current_pos, end_pos
@@ -329,26 +440,37 @@ class ContactManager:
 
     def get_all_contacts(self):
         """
-        Lee los registros existentes para mostrarlos en la tabla.
+        Lee los registros existentes para mostrarlos en la tabla, manejando posibles errores de archivo.
         """
         contacts = []
         if not os.path.exists(self.filename):
             return contacts
 
-        with open(self.filename, "r", encoding="utf-8", newline="\n") as f:
-            record_num = 0
-            while True:
-                f.seek(record_num * RECORD_SIZE)
-                pos = f.tell()
-                data = f.read(RECORD_SIZE)
-                if not data or len(data) < RECORD_SIZE - 1:
-                    break
-                parsed = self.parse_record(data)
-                if parsed:
-                    parsed["registro"] = record_num
-                    parsed["offset"] = pos
-                    contacts.append(parsed)
-                record_num += 1
+        try:
+            with open(self.filename, "r", encoding="utf-8", newline="\n") as f:
+                record_num = 0
+                while True:
+                    f.seek(record_num * RECORD_SIZE)
+                    pos = f.tell()
+                    data = f.read(RECORD_SIZE)
+                    if not data or len(data) < RECORD_SIZE - 1:
+                        break
+                    parsed = self.parse_record(data)
+                    if parsed:
+                        parsed["registro"] = record_num
+                        parsed["offset"] = pos
+                        contacts.append(parsed)
+                    record_num += 1
+        except PermissionError:
+            self.last_error = f"Sin permisos de lectura para '{self.filename}'."
+            print(f"ERROR: {self.last_error}")
+        except UnicodeDecodeError:
+            self.last_error = f"El archivo '{self.filename}' contiene bytes corruptos fuera de UTF-8."
+            print(f"ERROR: {self.last_error}")
+        except OSError as e:
+            self.last_error = f"Error al leer '{self.filename}': {e}"
+            print(f"ERROR: {self.last_error}")
+
         return contacts
 
     def export_to_json(self, output_file=EXPORT_JSON_FILE):
@@ -406,7 +528,6 @@ class ContactManager:
         pdf.alias_nb_pages()
         pdf.add_page()
 
-        # Bloque de resumen del archivo JSON origen
         pdf.set_fill_color(240, 244, 248)
         pdf.set_font("Helvetica", "B", 10)
         pdf.set_text_color(30, 30, 30)
@@ -425,7 +546,6 @@ class ContactManager:
         )
         pdf.ln(4)
 
-        # Encabezados de la tabla
         col_widths = [12, 16, 15, 45, 28, 48, 26]
         headers = ["#Reg", "Offset", "ID", "Nombre", "Telefono", "Correo", "Ciudad"]
 
@@ -437,7 +557,6 @@ class ContactManager:
             pdf.cell(width, 8, title, border=1, align="C", fill=True)
         pdf.ln()
 
-        # Filas de contactos leídas desde el JSON
         pdf.set_font("Helvetica", "", 8)
         pdf.set_text_color(20, 20, 20)
 
@@ -470,3 +589,82 @@ class ContactManager:
         pdf.output(pdf_file)
         print(f"INFO: Reporte PDF generado exitosamente en '{pdf_file}' a partir de '{json_file}'.")
         return pdf_file, len(contacts_list)
+
+    def create_zip_backup(self, zip_filepath=BACKUP_ZIP_FILE):
+        """
+        Crea un archivo de respaldo comprimido (.zip) usando el módulo zipfile
+        incluyendo el archivo de contactos (contactos.dat) y el índice (indice.json).
+        Retorna información detallada del tamaño original y tamaño comprimido.
+        """
+        if not os.path.exists(self.filename):
+            raise FileNotFoundError(f"El archivo '{self.filename}' no existe para respaldar.")
+        if not os.path.exists(self.index_filename):
+            self.save_index()
+
+        contacts_size = os.path.getsize(self.filename)
+        index_size = os.path.getsize(self.index_filename) if os.path.exists(self.index_filename) else 0
+        original_total = contacts_size + index_size
+
+        with zipfile.ZipFile(zip_filepath, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+            zf.write(self.filename, arcname=os.path.basename(self.filename))
+            if os.path.exists(self.index_filename):
+                zf.write(self.index_filename, arcname=os.path.basename(self.index_filename))
+
+        compressed_size = os.path.getsize(zip_filepath)
+        ratio = (1 - (compressed_size / original_total)) * 100 if original_total > 0 else 0.0
+
+        info = {
+            "zip_path": zip_filepath,
+            "contacts_size": contacts_size,
+            "index_size": index_size,
+            "original_size": original_total,
+            "compressed_size": compressed_size,
+            "reduction_percent": ratio
+        }
+        print(
+            f"INFO: Respaldo ZIP creado en '{zip_filepath}' "
+            f"(Original: {original_total} B -> Comprimido: {compressed_size} B, Ahorro: {ratio:.1f}%)"
+        )
+        return info
+
+    def get_file_metadata(self):
+        """
+        Obtiene los metadatos y permisos de contactos.dat e indice.json
+        utilizando os.stat() y os.access().
+        """
+        result = {}
+        for label, path in [("contactos", self.filename), ("indice", self.index_filename), ("hash", self.hash_filename)]:
+            if not os.path.exists(path):
+                result[label] = {
+                    "nombre": path,
+                    "existe": False,
+                    "tamano_bytes": 0,
+                    "ultima_modificacion": "No existe",
+                    "ultimo_acceso": "No existe",
+                    "permiso_lectura": False,
+                    "permiso_escritura": False,
+                    "modo_octal": "N/A"
+                }
+                continue
+
+            st = os.stat(path)
+            can_read = os.access(path, os.R_OK)
+            can_write = os.access(path, os.W_OK)
+
+            result[label] = {
+                "nombre": path,
+                "ruta_absoluta": os.path.abspath(path),
+                "existe": True,
+                "tamano_bytes": st.st_size,
+                "ultima_modificacion": datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                "ultimo_acceso": datetime.fromtimestamp(st.st_atime).strftime("%Y-%m-%d %H:%M:%S"),
+                "permiso_lectura": can_read,
+                "permiso_escritura": can_write,
+                "modo_octal": oct(st.st_mode)[-4:]
+            }
+
+        result["total_registros"] = (
+            result["contactos"]["tamano_bytes"] // RECORD_SIZE if result["contactos"]["existe"] else 0
+        )
+        result["tamano_registro_fijo"] = RECORD_SIZE
+        return result

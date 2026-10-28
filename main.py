@@ -1,14 +1,88 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog, filedialog
 import os
-from contact_manager import ContactManager, RECORD_SIZE, EXPORT_JSON_FILE, REPORT_PDF_FILE
+from contact_manager import (
+    ContactManager,
+    RECORD_SIZE,
+    FIELD_LENGTHS,
+    EXPORT_JSON_FILE,
+    REPORT_PDF_FILE,
+    BACKUP_ZIP_FILE
+)
+
+
+class FileInfoWindow(tk.Toplevel):
+    """
+    Ventana modal de 'Información del archivo' que muestra tamaño, fecha de última
+    modificación y permisos de lectura/escritura obtenidos mediante os.stat y os.access.
+    """
+
+    def __init__(self, parent, manager: ContactManager):
+        super().__init__(parent)
+        self.title("Información del Archivo y Permisos (os.stat / os.access)")
+        self.geometry("560x450")
+        self.resizable(False, False)
+        self.manager = manager
+
+        self.create_widgets()
+
+    def create_widgets(self):
+        container = ttk.Frame(self, padding=20)
+        container.pack(fill="both", expand=True)
+
+        ttk.Label(
+            container,
+            text="Metadatos y Permisos del Sistema de Archivos",
+            font=("Segoe UI", 13, "bold")
+        ).pack(anchor="w", pady=(0, 12))
+
+        meta = self.manager.get_file_metadata()
+        c_info = meta["contactos"]
+        i_info = meta["indice"]
+        h_info = meta["hash"]
+
+        # Sección 1: Archivo Principal de Registros Fijos (contactos.dat)
+        frame_dat = ttk.LabelFrame(container, text=f" Archivo de Registros Fijos ({c_info['nombre']}) ", padding=12)
+        frame_dat.pack(fill="x", pady=(0, 10))
+
+        rows_dat = [
+            ("Estado del archivo:", "Existente" if c_info["existe"] else "No encontrado"),
+            ("Tamaño total (os.stat.st_size):", f"{c_info['tamano_bytes']} bytes ({meta['total_registros']} registros x {RECORD_SIZE} bytes)"),
+            ("Última modificación (st_mtime):", c_info["ultima_modificacion"]),
+            ("Último acceso (st_atime):", c_info["ultimo_acceso"]),
+            ("Permiso de Lectura (os.access R_OK):", "SÍ (Habilitado)" if c_info["permiso_lectura"] else "NO (Denegado)"),
+            ("Permiso de Escritura (os.access W_OK):", "SÍ (Habilitado)" if c_info["permiso_escritura"] else "NO (Solo lectura)"),
+            ("Modo de archivo (st_mode):", c_info["modo_octal"]),
+        ]
+
+        for r, (label_txt, val_txt) in enumerate(rows_dat):
+            ttk.Label(frame_dat, text=label_txt, font=("Segoe UI", 9, "bold")).grid(row=r, column=0, sticky="w", pady=2)
+            ttk.Label(frame_dat, text=val_txt, font=("Segoe UI", 9)).grid(row=r, column=1, sticky="w", padx=(12, 0), pady=2)
+
+        # Sección 2: Archivo de Índice Primario (indice.json) y Hash (contactos.sha256)
+        frame_aux = ttk.LabelFrame(container, text=" Archivos Auxiliares (Índice JSON y Hash SHA-256) ", padding=12)
+        frame_aux.pack(fill="x", pady=(0, 12))
+
+        rows_aux = [
+            (f"Índice ({i_info['nombre']}):", f"{i_info['tamano_bytes']} bytes  |  Modificado: {i_info['ultima_modificacion']}"),
+            ("Permisos de indice.json:", f"Lectura: {'SÍ' if i_info['permiso_lectura'] else 'NO'}  |  Escritura: {'SÍ' if i_info['permiso_escritura'] else 'NO'}"),
+            (f"Hash ({h_info['nombre']}):", f"{h_info['tamano_bytes']} bytes  |  Modificado: {h_info['ultima_modificacion']}"),
+            ("Codificación general:", "UTF-8 estricto"),
+        ]
+
+        for r, (label_txt, val_txt) in enumerate(rows_aux):
+            ttk.Label(frame_aux, text=label_txt, font=("Segoe UI", 9, "bold")).grid(row=r, column=0, sticky="w", pady=2)
+            ttk.Label(frame_aux, text=val_txt, font=("Segoe UI", 9)).grid(row=r, column=1, sticky="w", padx=(12, 0), pady=2)
+
+        btn_close = ttk.Button(container, text="Cerrar", command=self.destroy)
+        btn_close.pack(anchor="e", pady=(5, 0))
 
 
 class AgendaApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Agenda de Contactos - Acceso Aleatorio e Integridad SHA-256")
-        self.geometry("880x560")
+        self.title("Agenda de Contactos con Acceso Aleatorio - Universidad Rafael Landívar")
+        self.geometry("900x580")
 
         self.manager = ContactManager()
 
@@ -41,15 +115,16 @@ class AgendaApp(tk.Tk):
         exportar_menu.add_command(label="Generar reporte PDF", command=self.export_contacts_pdf)
         menubar.add_cascade(label="Exportar", menu=exportar_menu)
 
-        # 3. Menú Herramientas (Verificar integridad SHA-256 funcional; ZIP e Info en próximo commit)
+        # 3. Menú Herramientas (Funcional: Verificar integridad, Crear respaldo ZIP e Información del archivo)
         herramientas_menu = tk.Menu(menubar, tearoff=0, font=("Segoe UI", 10))
         herramientas_menu.add_command(label="Verificar integridad (SHA-256)", command=lambda: self.check_integrity_action(on_startup=False))
-        herramientas_menu.add_command(label="Crear respaldo ZIP", command=lambda: self.pending_feature("Crear respaldo ZIP"))
-        herramientas_menu.add_command(label="Información del archivo", command=lambda: self.pending_feature("Información y permisos del archivo"))
+        herramientas_menu.add_command(label="Crear respaldo ZIP", command=self.create_backup_zip_action)
+        herramientas_menu.add_command(label="Información del archivo", command=self.open_file_info_window)
         menubar.add_cascade(label="Herramientas", menu=herramientas_menu)
 
         # 4. Menú Ayuda (simulado)
         ayuda_menu = tk.Menu(menubar, tearoff=0, font=("Segoe UI", 10))
+        ayuda_menu.add_command(label="Estructura del registro", command=self.show_record_structure_help)
         ayuda_menu.add_command(label="Acerca de...", command=self.show_help)
         menubar.add_cascade(label="Ayuda", menu=ayuda_menu)
 
@@ -75,15 +150,15 @@ class AgendaApp(tk.Tk):
         btn_search.pack(side="left")
 
         # Formulario de Contacto
-        form_frame = ttk.LabelFrame(left_panel, text=" Datos del Contacto (120 bytes fijos) ", padding=12)
+        form_frame = ttk.LabelFrame(left_panel, text=f" Datos del Contacto ({RECORD_SIZE} bytes fijos) ", padding=12)
         form_frame.pack(fill="both", expand=True)
 
         labels = [
-            ("ID (Entero único):", "id"),
-            ("Nombre (máx 30):", "nombre"),
-            ("Teléfono (máx 15):", "telefono"),
-            ("Correo (máx 40):", "correo"),
-            ("Ciudad (máx 28):", "ciudad")
+            (f"ID (Entero único, {FIELD_LENGTHS['id']} chars):", "id"),
+            (f"Nombre (máx {FIELD_LENGTHS['nombre']} chars):", "nombre"),
+            (f"Teléfono (máx {FIELD_LENGTHS['telefono']} chars):", "telefono"),
+            (f"Correo (máx {FIELD_LENGTHS['correo']} chars):", "correo"),
+            (f"Ciudad (máx {FIELD_LENGTHS['ciudad']} chars):", "ciudad")
         ]
 
         self.entries = {}
@@ -180,6 +255,42 @@ class AgendaApp(tk.Tk):
                     text=f" Firma SHA-256 resincronizada ({new_h[:12]}...) e índice reconstruido."
                 )
 
+    def create_backup_zip_action(self):
+        filepath = filedialog.asksaveasfilename(
+            title="Guardar respaldo comprimido ZIP",
+            initialfile=BACKUP_ZIP_FILE,
+            defaultextension=".zip",
+            filetypes=[("Archivo ZIP", "*.zip"), ("Todos los archivos", "*.*")],
+            parent=self
+        )
+        if not filepath:
+            return
+
+        try:
+            info = self.manager.create_zip_backup(filepath)
+            self.status_bar.configure(
+                text=(
+                    f" Respaldo ZIP creado: '{os.path.basename(info['zip_path'])}'  |  "
+                    f"Original: {info['original_size']} B -> Comprimido: {info['compressed_size']} B "
+                    f"(Reducción: {info['reduction_percent']:.1f}%)"
+                )
+            )
+            messagebox.showinfo(
+                "Respaldo Comprimido ZIP Generado",
+                f"Se creó exitosamente el archivo de respaldo con 'contactos.dat' e 'indice.json'.\n\n"
+                f"• Tamaño contactos.dat: {info['contacts_size']} bytes\n"
+                f"• Tamaño indice.json: {info['index_size']} bytes\n"
+                f"• Tamaño total original: {info['original_size']} bytes\n"
+                f"• Tamaño comprimido (ZIP): {info['compressed_size']} bytes\n"
+                f"• Porcentaje de reducción: {info['reduction_percent']:.2f}%\n\n"
+                f"Ruta: {info['zip_path']}"
+            )
+        except Exception as e:
+            messagebox.showerror("Error al crear respaldo ZIP", f"No se pudo generar el archivo ZIP:\n{e}")
+
+    def open_file_info_window(self):
+        FileInfoWindow(self, self.manager)
+
     def focus_add_form(self):
         self.clear_form()
         self.entries["id"].focus_set()
@@ -214,15 +325,18 @@ class AgendaApp(tk.Tk):
         values = self.tree.item(selected[0], "values")
         if values:
             contact_id = values[2]
-            contact = self.manager.search_by_id(contact_id)
-            if contact:
-                self.fill_form(contact)
-                self.status_bar.configure(
-                    text=(
-                        f" Acceso directo [seek({contact['offset']})] -> Registro #{contact['registro']}  |  "
-                        f"tell() inicio: {contact['offset']} bytes  |  tell() fin lectura: {contact['tell_after_read']} bytes"
+            try:
+                contact = self.manager.search_by_id(contact_id)
+                if contact:
+                    self.fill_form(contact)
+                    self.status_bar.configure(
+                        text=(
+                            f" Acceso directo [seek({contact['offset']})] -> Registro #{contact['registro']}  |  "
+                            f"tell() inicio: {contact['offset']} bytes  |  tell() fin lectura: {contact['tell_after_read']} bytes"
+                        )
                     )
-                )
+            except Exception as e:
+                messagebox.showerror("Error de lectura", str(e))
 
     def save_contact(self):
         c_id = self.entries["id"].get().strip()
@@ -251,6 +365,10 @@ class AgendaApp(tk.Tk):
             self.refresh_table()
         except ValueError as e:
             messagebox.showerror("ID Duplicado", str(e))
+        except PermissionError as e:
+            messagebox.showerror("Error de Permisos", str(e))
+        except Exception as e:
+            messagebox.showerror("Error al Guardar", f"Ocurrió un error inesperado:\n{e}")
 
     def search_contact_from_bar(self):
         c_id = self.search_id_entry.get().strip()
@@ -271,14 +389,18 @@ class AgendaApp(tk.Tk):
             messagebox.showwarning("Validación", "El ID a buscar debe ser un número entero.")
             return
 
-        contact = self.manager.search_by_id(int(c_id))
+        try:
+            contact = self.manager.search_by_id(int(c_id))
+        except Exception as e:
+            messagebox.showerror("Error de lectura", f"No se pudo realizar la búsqueda:\n{e}")
+            return
+
         if not contact:
             self.status_bar.configure(text=f" Búsqueda en indice.json: El ID {c_id} no existe en la agenda.")
             messagebox.showinfo("No encontrado", f"No existe ningún contacto registrado con el ID {c_id}.")
             return
 
         self.fill_form(contact)
-        # Resaltar fila en el Treeview
         for item in self.tree.get_children():
             vals = self.tree.item(item, "values")
             if str(vals[2]) == str(contact["id"]):
@@ -339,6 +461,10 @@ class AgendaApp(tk.Tk):
             )
         except KeyError as e:
             messagebox.showerror("ID no encontrado", str(e))
+        except PermissionError as e:
+            messagebox.showerror("Error de Permisos", str(e))
+        except Exception as e:
+            messagebox.showerror("Error al Modificar", f"No se pudo modificar el contacto:\n{e}")
 
     def export_contacts_json(self):
         filepath = filedialog.asksaveasfilename(
@@ -401,18 +527,31 @@ class AgendaApp(tk.Tk):
                 values=(c["registro"], c["offset"], c["id"], c["nombre"], c["telefono"], c["correo"], c["ciudad"])
             )
 
-    def pending_feature(self, feature_name):
-        self.status_bar.configure(text=f" Acción seleccionada: {feature_name} (En desarrollo para próximos commits)")
-        messagebox.showinfo("En desarrollo", f"La función '{feature_name}' se implementará en el siguiente commit.")
+    def show_record_structure_help(self):
+        messagebox.showinfo(
+            "Estructura del Registro de Tamaño Fijo",
+            f"Cada registro en 'contactos.dat' mide exactamente {RECORD_SIZE} bytes:\n\n"
+            f"• ID: {FIELD_LENGTHS['id']} caracteres (rellenado con ljust)\n"
+            f"• Nombre: {FIELD_LENGTHS['nombre']} caracteres (rellenado con ljust)\n"
+            f"• Teléfono: {FIELD_LENGTHS['telefono']} caracteres (rellenado con ljust)\n"
+            f"• Correo: {FIELD_LENGTHS['correo']} caracteres (rellenado con ljust)\n"
+            f"• Ciudad: {FIELD_LENGTHS['ciudad']} caracteres (rellenado con ljust)\n"
+            f"• Salto de línea (\\n): 1 carácter\n\n"
+            f"Fórmula de acceso aleatorio:\n"
+            f"offset = numero_de_registro * {RECORD_SIZE}"
+        )
 
     def show_help(self):
         messagebox.showinfo(
-            "Ayuda (Simulado)",
-            "Agenda de Contactos con Acceso Aleatorio v0.5\n\n"
-            f"• Tamaño fijo por registro: {RECORD_SIZE} bytes.\n"
-            "• Índice primario almacenado en 'indice.json'.\n"
-            "• Exportación a JSON y reporte PDF con fpdf2.\n"
-            "• Verificación de integridad SHA-256 ('contactos.sha256') activa al iniciar y guardar."
+            "Ayuda (Simulado) - Acerca de",
+            "Agenda de Contactos con Acceso Aleatorio v1.0\n"
+            "Universidad Rafael Landívar - Campus San Alberto Hurtado, S.J.\n"
+            "Facultad de Ingeniería - Octubre de 2026\n\n"
+            f"• Tamaño fijo por registro: {RECORD_SIZE} bytes (ljust).\n"
+            "• Acceso aleatorio directo e in-place con seek() y tell().\n"
+            "• Índice primario en 'indice.json'.\n"
+            "• Exportación JSON + Reporte PDF (fpdf2).\n"
+            "• Integridad SHA-256 (hashlib), Respaldo ZIP (zipfile) y Metadatos (os.stat / os.access)."
         )
 
 

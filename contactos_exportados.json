@@ -1,0 +1,80 @@
+{
+    "fecha_exportacion": "2026-10-27 23:14:10",
+    "archivo_origen": "contactos.dat",
+    "tamano_registro_fijo": 120,
+    "total_contactos": 8,
+    "contactos": [
+        {
+            "id": 101,
+            "nombre": "Josue Soch",
+            "telefono": "5544-1122",
+            "correo": "jsoch@correo.url.edu.gt",
+            "ciudad": "Quetzaltenango",
+            "numero_registro": 0,
+            "offset_bytes": 0
+        },
+        {
+            "id": 102,
+            "nombre": "Maria Fernanda Lopez",
+            "telefono": "4433-2211",
+            "correo": "mflopez@correo.url.edu.gt",
+            "ciudad": "Guatemala",
+            "numero_registro": 1,
+            "offset_bytes": 120
+        },
+        {
+            "id": 105,
+            "nombre": "Carlos E. Ruiz Modificado",
+            "telefono": "3322-0000",
+            "correo": "carlos.ruiz@url.edu.gt",
+            "ciudad": "Quetzaltenango",
+            "numero_registro": 2,
+            "offset_bytes": 240
+        },
+        {
+            "id": 108,
+            "nombre": "Ana Lucia Morales",
+            "telefono": "7766-5544",
+            "correo": "almorales@correo.url.edu.gt",
+            "ciudad": "San Marcos",
+            "numero_registro": 3,
+            "offset_bytes": 360
+        },
+        {
+            "id": 112,
+            "nombre": "Diego Alejandro Perez",
+            "telefono": "5511-9900",
+            "correo": "daperez@correo.url.edu.gt",
+            "ciudad": "Huehuetenango",
+            "numero_registro": 4,
+            "offset_bytes": 480
+        },
+        {
+            "id": 115,
+            "nombre": "Sofia Gabriela Gomez",
+            "telefono": "4488-7766",
+            "correo": "sggomez@correo.url.edu.gt",
+            "ciudad": "Retalhuleu",
+            "numero_registro": 5,
+            "offset_bytes": 600
+        },
+        {
+            "id": 120,
+            "nombre": "Luis Fernando Castillo",
+            "telefono": "3399-4455",
+            "correo": "lfcastillo@correo.url.edu.gt",
+            "ciudad": "Mazatenango",
+            "numero_registro": 6,
+            "offset_bytes": 720
+        },
+        {
+            "id": 125,
+            "nombre": "Valeria Alejandra Diaz",
+            "telefono": "7722-3344",
+            "correo": "vadiaz@correo.url.edu.gt",
+            "ciudad": "Antigua Guatemala",
+            "numero_registro": 7,
+            "offset_bytes": 840
+        }
+    ]
+}

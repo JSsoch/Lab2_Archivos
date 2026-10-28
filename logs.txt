@@ -1,0 +1,48 @@
+======================================================================
+BATERÍA DE PRUEBAS Y GENERACIÓN DE ENTREGABLES - LABORATORIO NO. 2
+Fecha de ejecución: 2026-10-27 23:14:10
+======================================================================
+
+--- 1. PRUEBA DE INICIALIZACIÓN CON ARCHIVOS INEXISTENTES ---
+Archivo 'contactos.dat' inicializado correctamente (Tamaño: 0 bytes).
+
+--- 2. INSERCIÓN DE CONTACTOS (REGISTROS DE TAMAÑO FIJO = 120 BYTES) ---
+ -> Agregado ID 101: Registro #0 | seek/tell offset: 0 B | SHA-256: 22bf352293656e07...
+ -> Agregado ID 102: Registro #1 | seek/tell offset: 120 B | SHA-256: 8d7f913607c9b772...
+ -> Agregado ID 105: Registro #2 | seek/tell offset: 240 B | SHA-256: 44b72498d6d44166...
+ -> Agregado ID 108: Registro #3 | seek/tell offset: 360 B | SHA-256: bb1305937de30f2b...
+ -> Agregado ID 112: Registro #4 | seek/tell offset: 480 B | SHA-256: 6754c51501ed1fbe...
+ -> Agregado ID 115: Registro #5 | seek/tell offset: 600 B | SHA-256: a2a8cbfb3743525e...
+ -> Agregado ID 120: Registro #6 | seek/tell offset: 720 B | SHA-256: 5eb6c652a961f192...
+ -> Agregado ID 125: Registro #7 | seek/tell offset: 840 B | SHA-256: 362551fef0d46942...
+
+--- 3. BÚSQUEDA DIRECTA POR ID MEDIANTE ÍNDICE PRIMARIO (indice.json) ---
+ -> Búsqueda ID 108 en indice.json: Registro #3 | seek(360) | tell() fin: 480 | Nombre: Ana Lucia Morales
+ -> Búsqueda ID 999 (inexistente): Resultado = None (Controlado sin errores)
+
+--- 4. MODIFICACIÓN EN EL LUGAR (IN-PLACE) CON seek() Y tell() ---
+ -> Modificado ID 105 en Registro #2: seek(240) -> tell(360) | Tamaño archivo antes: 960 B, después: 960 B
+ -> Nuevo Hash SHA-256 guardado en 'contactos.sha256': 12a06fe256c4efe0ed80bc4f34a14941f37074604b41c211424fc0b6dbdbc51e
+
+--- 5. PRUEBA DE DETECCIÓN DE ALTERACIÓN MANUAL (INTEGRIDAD SHA-256) ---
+ -> Estado tras alteración manual externa: es_integro=False
+ -> Hash esperado (contactos.sha256): 12a06fe256c4efe0ed80bc4f34a14941f37074604b41c211424fc0b6dbdbc51e
+ -> Hash calculado (archivo alterado): c857900f2112f6f758e04d999249783f9bd1d79042e1c77120b25f05aeb03ab3
+ -> Mensaje del sistema: ¡ALERTA DE INTEGRIDAD! El archivo de contactos fue modificado fuera de la aplicación (el hash SHA-256 no coincide).
+ -> Archivo restaurado a su estado íntegro: es_integro=True (Integridad verificada: el archivo coincide exactamente con el hash SHA-256 registrado.)
+
+--- 6. PRUEBA DE RECUPERACIÓN ANTE ÍNDICE CORRUPTO ---
+ -> Índice reconstruido exitosamente tras corrupción: 8 entradas activas.
+
+--- 7. EXPORTACIÓN A JSON, REPORTE PDF Y RESPALDO ZIP ---
+ -> Exportado JSON: contactos_exportados.json (2504 bytes)
+ -> Reporte PDF: reporte_contactos.pdf (2597 bytes)
+ -> Respaldo ZIP: respaldo_agenda.zip | Original (contactos.dat + indice.json): 1083 bytes vs Comprimido: 642 bytes (Reducción: 40.72%)
+
+--- 8. METADATOS Y PERMISOS (os.stat y os.access) ---
+ -> Archivo: contactos.dat | Tamaño: 960 B | Modificado: 2026-10-27 23:14:10
+ -> Permiso Lectura (R_OK): True | Permiso Escritura (W_OK): True | Modo: 0666
+
+======================================================================
+PRUEBAS Y ARCHIVOS ENTREGABLES GENERADOS EXITOSAMENTE
+======================================================================
