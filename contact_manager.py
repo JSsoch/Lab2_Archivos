@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 from datetime import datetime
@@ -5,6 +6,7 @@ from fpdf import FPDF
 
 CONTACTS_FILE = "contactos.dat"
 INDEX_FILE = "indice.json"
+HASH_FILE = "contactos.sha256"
 EXPORT_JSON_FILE = "contactos_exportados.json"
 REPORT_PDF_FILE = "reporte_contactos.pdf"
 
@@ -53,12 +55,14 @@ class ContactManager:
     """
     Gestor de archivos para la agenda de contactos con registros de tamaño fijo.
     Incluye índice primario en JSON (indice.json), búsqueda directa por ID con seek(),
-    modificación en el lugar (in-place), exportación a JSON y generación de reporte PDF.
+    modificación en el lugar (in-place), exportación a JSON, reporte PDF y
+    verificación de integridad mediante hash SHA-256 (contactos.sha256).
     """
 
-    def __init__(self, filename=CONTACTS_FILE, index_filename=INDEX_FILE):
+    def __init__(self, filename=CONTACTS_FILE, index_filename=INDEX_FILE, hash_filename=HASH_FILE):
         self.filename = filename
         self.index_filename = index_filename
+        self.hash_filename = hash_filename
         self.index = {}
         self._ensure_file_exists()
         self.load_index()
@@ -67,7 +71,77 @@ class ContactManager:
         if not os.path.exists(self.filename):
             with open(self.filename, "w", encoding="utf-8", newline="\n") as f:
                 pass
-            print(f"INFO: Archivo '{self.filename}' creado exitosamente.")
+            self.save_hash()
+            print(f"INFO: Archivo '{self.filename}' y su hash inicial creados exitosamente.")
+
+    def calculate_sha256(self):
+        """
+        Calcula y retorna el hash SHA-256 actual del archivo de contactos (contactos.dat)
+        utilizando el módulo hashlib.
+        """
+        if not os.path.exists(self.filename):
+            return ""
+
+        sha256 = hashlib.sha256()
+        with open(self.filename, "rb") as f:
+            for chunk in iter(lambda: f.read(4096), b""):
+                sha256.update(chunk)
+        return sha256.hexdigest()
+
+    def save_hash(self):
+        """
+        Calcula el hash SHA-256 de contactos.dat y lo guarda en contactos.sha256 (UTF-8).
+        Se invoca automáticamente cada vez que se guarda o modifica un contacto.
+        """
+        current_hash = self.calculate_sha256()
+        with open(self.hash_filename, "w", encoding="utf-8") as f:
+            f.write(current_hash + "\n")
+        print(f"INFO: Hash SHA-256 actualizado en '{self.hash_filename}': {current_hash[:16]}...")
+        return current_hash
+
+    def verify_integrity(self):
+        """
+        Recalcula el hash SHA-256 del archivo de contactos y lo compara con el almacenado
+        en contactos.sha256.
+        Retorna una tupla: (es_integro: bool, hash_actual: str, hash_guardado: str, mensaje: str)
+        """
+        if not os.path.exists(self.filename):
+            return False, "", "", f"El archivo '{self.filename}' no existe."
+
+        current_hash = self.calculate_sha256()
+
+        if not os.path.exists(self.hash_filename):
+            # Si aún no existía archivo hash pero el archivo está vacío, lo inicializamos
+            if os.path.getsize(self.filename) == 0:
+                self.save_hash()
+                return True, current_hash, current_hash, "Archivo nuevo verificado correctamente."
+            return (
+                False,
+                current_hash,
+                "(No encontrado)",
+                f"No se encontró el archivo de control '{self.hash_filename}'. El archivo pudo haber sido manipulado."
+            )
+
+        with open(self.hash_filename, "r", encoding="utf-8") as f:
+            stored_hash = f.read().strip().split()[0] if f.read(1) else ""
+            f.seek(0)
+            content = f.read().strip()
+            stored_hash = content.split()[0] if content else ""
+
+        if current_hash == stored_hash:
+            return (
+                True,
+                current_hash,
+                stored_hash,
+                "Integridad verificada: el archivo coincide exactamente con el hash SHA-256 registrado."
+            )
+        else:
+            return (
+                False,
+                current_hash,
+                stored_hash,
+                "¡ALERTA DE INTEGRIDAD! El archivo de contactos fue modificado fuera de la aplicación (el hash SHA-256 no coincide)."
+            )
 
     def load_index(self):
         """
@@ -165,7 +239,7 @@ class ContactManager:
     def add_contact(self, contact_id, nombre, telefono, correo, ciudad):
         """
         Agrega un nuevo contacto al final del archivo usando seek() y tell(),
-        validando en el índice primario que el ID sea único y actualizando indice.json.
+        actualiza el índice primario (indice.json) y recalcula el hash SHA-256 (contactos.sha256).
         """
         id_key = str(int(contact_id))
         if id_key in self.index:
@@ -181,12 +255,13 @@ class ContactManager:
             f.write(record)
             new_pos = f.tell()
 
-        # Actualizar índice primario y guardarlo en JSON
+        # Actualizar índice primario y hash de integridad SHA-256
         self.index[id_key] = record_number
         self.save_index()
+        new_hash = self.save_hash()
 
         print(f"INFO: Contacto ID {id_key} guardado en registro #{record_number} (offset: {byte_offset}, tell final: {new_pos})")
-        return record_number, byte_offset
+        return record_number, byte_offset, new_hash
 
     def search_by_id(self, contact_id):
         """
@@ -209,7 +284,7 @@ class ContactManager:
         """
         Modificación en el lugar (in-place):
         Consulta el número de registro en el índice, usa seek() para posicionarse exactamente
-        en ese registro y sobrescribe únicamente esos 120 bytes sin reescribir el resto del archivo.
+        en ese registro, sobrescribe únicamente esos 120 bytes y actualiza el hash SHA-256.
         """
         id_key = str(int(contact_id))
         if id_key not in self.index:
@@ -225,11 +300,13 @@ class ContactManager:
             f.write(record)
             end_pos = f.tell()
 
+        new_hash = self.save_hash()
+
         print(
             f"INFO: Contacto ID {id_key} modificado in-place en registro #{record_number} "
             f"(tell inicio: {start_pos}, tell fin: {end_pos})"
         )
-        return record_number, start_pos, end_pos
+        return record_number, start_pos, end_pos, new_hash
 
     def read_record_by_number(self, record_number):
         """
@@ -317,7 +394,6 @@ class ContactManager:
         Exporta (o actualiza) primero el archivo JSON y, a partir de ese JSON,
         genera un reporte PDF con tabla formateada y fecha de generación usando fpdf2.
         """
-        # Garantizar que el archivo JSON esté actualizado antes de leerlo para el PDF
         self.export_to_json(json_file)
 
         with open(json_file, "r", encoding="utf-8") as f:

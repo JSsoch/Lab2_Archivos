@@ -7,7 +7,7 @@ from contact_manager import ContactManager, RECORD_SIZE, EXPORT_JSON_FILE, REPOR
 class AgendaApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Agenda de Contactos - Acceso Aleatorio, JSON y Reporte PDF")
+        self.title("Agenda de Contactos - Acceso Aleatorio e Integridad SHA-256")
         self.geometry("880x560")
 
         self.manager = ContactManager()
@@ -19,6 +19,9 @@ class AgendaApp(tk.Tk):
         self.build_menu()
         self.setup_ui()
         self.refresh_table()
+
+        # Al iniciar la aplicación se recalcula el hash SHA-256 y se compara con contactos.sha256
+        self.after(200, lambda: self.check_integrity_action(on_startup=True))
 
     def build_menu(self):
         menubar = tk.Menu(self, font=("Segoe UI", 10))
@@ -38,9 +41,9 @@ class AgendaApp(tk.Tk):
         exportar_menu.add_command(label="Generar reporte PDF", command=self.export_contacts_pdf)
         menubar.add_cascade(label="Exportar", menu=exportar_menu)
 
-        # 3. Menú Herramientas
+        # 3. Menú Herramientas (Verificar integridad SHA-256 funcional; ZIP e Info en próximo commit)
         herramientas_menu = tk.Menu(menubar, tearoff=0, font=("Segoe UI", 10))
-        herramientas_menu.add_command(label="Verificar integridad (SHA-256)", command=lambda: self.pending_feature("Verificar integridad SHA-256"))
+        herramientas_menu.add_command(label="Verificar integridad (SHA-256)", command=lambda: self.check_integrity_action(on_startup=False))
         herramientas_menu.add_command(label="Crear respaldo ZIP", command=lambda: self.pending_feature("Crear respaldo ZIP"))
         herramientas_menu.add_command(label="Información del archivo", command=lambda: self.pending_feature("Información y permisos del archivo"))
         menubar.add_cascade(label="Herramientas", menu=herramientas_menu)
@@ -130,7 +133,7 @@ class AgendaApp(tk.Tk):
         self.tree.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # Barra de estado inferior mostrando información de seek() y tell()
+        # Barra de estado inferior mostrando información de seek(), tell() y hash SHA-256
         self.status_bar = ttk.Label(
             self,
             text=f" Archivo: contactos.dat  |  Índice: indice.json ({len(self.manager.index)} entradas)  |  Tamaño fijo: {RECORD_SIZE} bytes",
@@ -139,6 +142,43 @@ class AgendaApp(tk.Tk):
             padding=4
         )
         self.status_bar.pack(side="bottom", fill="x")
+
+    def check_integrity_action(self, on_startup=False):
+        """
+        Verifica el hash SHA-256 de contactos.dat frente a contactos.sha256.
+        Si no coincide al iniciar o al consultarse manualmente, alerta al usuario.
+        """
+        is_valid, current_hash, stored_hash, msg = self.manager.verify_integrity()
+
+        if is_valid:
+            self.status_bar.configure(
+                text=f" Integridad SHA-256 OK ({current_hash[:12]}...)  |  Contactos: {len(self.manager.index)}  |  Registro fijo: {RECORD_SIZE}B"
+            )
+            if not on_startup:
+                messagebox.showinfo(
+                    "Verificación de Integridad (SHA-256)",
+                    f"{msg}\n\n"
+                    f"• Hash actual calculado:\n{current_hash}\n\n"
+                    f"• Hash guardado (contactos.sha256):\n{stored_hash}"
+                )
+        else:
+            self.status_bar.configure(
+                text=f" ALERTA: Hash SHA-256 NO COINCIDE. El archivo '{self.manager.filename}' fue modificado fuera de la aplicación."
+            )
+            res = messagebox.askyesno(
+                "Alerta de Integridad SHA-256",
+                f"{msg}\n\n"
+                f"• Hash actual (contactos.dat):\n{current_hash}\n\n"
+                f"• Hash esperado (contactos.sha256):\n{stored_hash}\n\n"
+                "¿Desea reconstruir el índice y actualizar la firma SHA-256 con el estado actual del archivo?"
+            )
+            if res:
+                self.manager.rebuild_index()
+                new_h = self.manager.save_hash()
+                self.refresh_table()
+                self.status_bar.configure(
+                    text=f" Firma SHA-256 resincronizada ({new_h[:12]}...) e índice reconstruido."
+                )
 
     def focus_add_form(self):
         self.clear_form()
@@ -200,11 +240,11 @@ class AgendaApp(tk.Tk):
             return
 
         try:
-            rec_num, offset = self.manager.add_contact(int(c_id), nombre, telefono, correo, ciudad)
+            rec_num, offset, new_hash = self.manager.add_contact(int(c_id), nombre, telefono, correo, ciudad)
             self.status_bar.configure(
                 text=(
-                    f" Contacto ID {c_id} agregado en Registro #{rec_num}  |  "
-                    f"Posición tell(): {offset} bytes  |  Índice actualizado en indice.json"
+                    f" Contacto ID {c_id} guardado en Reg #{rec_num} (tell: {offset}B)  |  "
+                    f"SHA-256 actualizado: {new_hash[:12]}..."
                 )
             )
             self.clear_form()
@@ -282,11 +322,11 @@ class AgendaApp(tk.Tk):
             return
 
         try:
-            rec_num, start_pos, end_pos = self.manager.update_contact(int(c_id), nombre, telefono, correo, ciudad)
+            rec_num, start_pos, end_pos, new_hash = self.manager.update_contact(int(c_id), nombre, telefono, correo, ciudad)
             self.status_bar.configure(
                 text=(
-                    f" Modificación In-Place exitosa: ID {c_id} en Registro #{rec_num}  |  "
-                    f"seek({start_pos}) -> sobrescritos {end_pos - start_pos} bytes (tell final: {end_pos})"
+                    f" Modificación In-Place: ID {c_id} en Reg #{rec_num} (seek: {start_pos}B)  |  "
+                    f"SHA-256 actualizado: {new_hash[:12]}..."
                 )
             )
             self.refresh_table()
@@ -295,7 +335,7 @@ class AgendaApp(tk.Tk):
                 f"Contacto ID {c_id} actualizado directamente en el Registro #{rec_num}.\n\n"
                 f"• Offset inicial (tell): {start_pos} bytes\n"
                 f"• Offset final (tell): {end_pos} bytes\n"
-                f"• Solo se sobrescribieron los {RECORD_SIZE} bytes de este registro."
+                f"• Nuevo Hash SHA-256:\n{new_hash}"
             )
         except KeyError as e:
             messagebox.showerror("ID no encontrado", str(e))
@@ -368,10 +408,11 @@ class AgendaApp(tk.Tk):
     def show_help(self):
         messagebox.showinfo(
             "Ayuda (Simulado)",
-            "Agenda de Contactos con Acceso Aleatorio v0.4\n\n"
+            "Agenda de Contactos con Acceso Aleatorio v0.5\n\n"
             f"• Tamaño fijo por registro: {RECORD_SIZE} bytes.\n"
             "• Índice primario almacenado en 'indice.json'.\n"
-            "• Exportación a JSON y generación de reporte PDF con fpdf2 habilitadas."
+            "• Exportación a JSON y reporte PDF con fpdf2.\n"
+            "• Verificación de integridad SHA-256 ('contactos.sha256') activa al iniciar y guardar."
         )
 
 
