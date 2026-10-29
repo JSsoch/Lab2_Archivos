@@ -1,6 +1,6 @@
 ======================================================================
 BATERÍA DE PRUEBAS Y GENERACIÓN DE ENTREGABLES - LABORATORIO NO. 2
-Fecha de ejecución: 2026-10-27 23:14:10
+Fecha de ejecución: 2026-10-28 22:13:02
 ======================================================================
 
 --- 1. PRUEBA DE INICIALIZACIÓN CON ARCHIVOS INEXISTENTES ---
@@ -36,11 +36,11 @@ Archivo 'contactos.dat' inicializado correctamente (Tamaño: 0 bytes).
 
 --- 7. EXPORTACIÓN A JSON, REPORTE PDF Y RESPALDO ZIP ---
  -> Exportado JSON: contactos_exportados.json (2504 bytes)
- -> Reporte PDF: reporte_contactos.pdf (2597 bytes)
+ -> Reporte PDF: reporte_contactos.pdf (2617 bytes)
  -> Respaldo ZIP: respaldo_agenda.zip | Original (contactos.dat + indice.json): 1083 bytes vs Comprimido: 642 bytes (Reducción: 40.72%)
 
 --- 8. METADATOS Y PERMISOS (os.stat y os.access) ---
- -> Archivo: contactos.dat | Tamaño: 960 B | Modificado: 2026-10-27 23:14:10
+ -> Archivo: contactos.dat | Tamaño: 960 B | Modificado: 2026-10-28 22:13:02
  -> Permiso Lectura (R_OK): True | Permiso Escritura (W_OK): True | Modo: 0666
 
 ======================================================================

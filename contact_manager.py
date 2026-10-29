@@ -32,14 +32,14 @@ class ContactReportPDF(FPDF):
 
     def header(self):
         self.set_font("Helvetica", "B", 15)
-        self.set_text_color(25, 55, 109)
+        self.set_text_color(216, 67, 21)
         self.cell(0, 10, "Agenda de Contactos - Reporte Oficial", new_x="LMARGIN", new_y="NEXT", align="C")
         self.set_font("Helvetica", "", 9)
-        self.set_text_color(90, 90, 90)
+        self.set_text_color(90, 60, 45)
         self.cell(
             0,
             6,
-            f"Fecha y hora de generacion: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  |  Tamano de registro fijo: {RECORD_SIZE} bytes",
+            f"Estudiante: Josue Soch (Carnet: 1537924)  |  Generado: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  |  Registro fijo: {RECORD_SIZE} B",
             new_x="LMARGIN",
             new_y="NEXT",
             align="C"
@@ -49,8 +49,8 @@ class ContactReportPDF(FPDF):
     def footer(self):
         self.set_y(-15)
         self.set_font("Helvetica", "I", 8)
-        self.set_text_color(128, 128, 128)
-        self.cell(0, 10, f"Pagina {self.page_no()}/{{nb}} - Generado a partir de JSON exportado", align="C")
+        self.set_text_color(128, 90, 70)
+        self.cell(0, 10, f"Pagina {self.page_no()}/{{nb}} - Generado a partir de JSON exportado (Carnet: 1537924)", align="C")
 
 
 class ContactManager:
@@ -528,9 +528,9 @@ class ContactManager:
         pdf.alias_nb_pages()
         pdf.add_page()
 
-        pdf.set_fill_color(240, 244, 248)
+        pdf.set_fill_color(255, 243, 224)
         pdf.set_font("Helvetica", "B", 10)
-        pdf.set_text_color(30, 30, 30)
+        pdf.set_text_color(78, 52, 46)
         pdf.cell(
             0,
             8,
@@ -549,7 +549,7 @@ class ContactManager:
         col_widths = [12, 16, 15, 45, 28, 48, 26]
         headers = ["#Reg", "Offset", "ID", "Nombre", "Telefono", "Correo", "Ciudad"]
 
-        pdf.set_fill_color(25, 55, 109)
+        pdf.set_fill_color(216, 67, 21)
         pdf.set_text_color(255, 255, 255)
         pdf.set_font("Helvetica", "B", 9)
 
@@ -558,7 +558,7 @@ class ContactManager:
         pdf.ln()
 
         pdf.set_font("Helvetica", "", 8)
-        pdf.set_text_color(20, 20, 20)
+        pdf.set_text_color(30, 20, 15)
 
         if not contacts_list:
             pdf.cell(sum(col_widths), 10, "No hay contactos registrados para mostrar.", border=1, align="C")
@@ -567,7 +567,7 @@ class ContactManager:
             for idx, c in enumerate(contacts_list):
                 fill_row = (idx % 2 == 1)
                 if fill_row:
-                    pdf.set_fill_color(245, 247, 250)
+                    pdf.set_fill_color(255, 248, 240)
                 else:
                     pdf.set_fill_color(255, 255, 255)
 
